@@ -282,6 +282,9 @@ def registerNetwork(name, password='', ssl=False, sasl_username='',
     registerGlobalValue(sasl, 'password', registry.String(sasl_password,
         """Determines what SASL password will be used on %s.""" \
         % (name,), private=True))
+    registerGlobalValue(sasl, 'required',
+        registry.Boolean(False, """If set and SASL auth fails, bot will refuse to continue.
+        Useful for Freenode for cloak-at-connect-or-fail.""", showDefault=True, setDefault=True, private=True))
     return network
 
 # Let's fill our networks.

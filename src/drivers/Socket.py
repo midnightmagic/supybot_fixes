@@ -168,6 +168,11 @@ class SocketDriver(drivers.IrcDriver, drivers.ServersMixin):
         else:
             drivers.log.debug('Not resetting %s.', self.irc)
         server = self._getNextServer()
+
+        if self.networkGroup.get('sasl').required() and not self.networkGroup.get('ssl').value:
+            drivers.log.error('SASL required but it is crazy to use it without SSL.')
+            return
+
         drivers.log.connect(self.currentServer)
         try:
             self.conn = utils.net.getSocket(server[0])

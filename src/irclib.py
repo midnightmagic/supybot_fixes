@@ -865,9 +865,11 @@ class Irc(IrcCommandDispatcher):
         for callback in self.callbacks:
             callback.reset()
         self._queueConnectMessages()
+        self.sasl_successful = False
 
     def _setNonResettingVariables(self):
         # Configuration stuff.
+        self.sasl_successful = False
         self.nick = conf.supybot.nick()
         self.user = conf.supybot.user()
         self.ident = conf.supybot.ident()
@@ -875,6 +877,8 @@ class Irc(IrcCommandDispatcher):
         self.password = conf.supybot.networks.get(self.network).password()
         self.sasl_username = conf.supybot.networks.get(self.network).sasl.username()
         self.sasl_password = conf.supybot.networks.get(self.network).sasl.password()
+        self.sasl_required = conf.supybot.networks.get(self.network).sasl.required()
+        self.using_tls = conf.supybot.networks.get(self.network).ssl()
         self.prefix = '%s!%s@%s' % (self.nick, self.ident, 'unset.domain')
         # The rest.
         self.lastTake = 0
@@ -889,9 +893,11 @@ class Irc(IrcCommandDispatcher):
             self._reallyDie()
         else:
             if self.sasl_password:
+                if not self.using_tls:
+                    log.error('Crazy to use SASL PLAIN over unencrypted network. Please enable SSL.')
                 if not self.sasl_username:
                     log.error('SASL username is not set, unable to identify.')
-                else:
+                elif self.using_tls:
                     auth_string = base64.b64encode('%s\x00%s\x00%s' % (self.sasl_username,
                         self.sasl_username, self.sasl_password))
                     log.debug('Sending CAP REQ command, requesting capability \'sasl\'.')
@@ -910,12 +916,19 @@ class Irc(IrcCommandDispatcher):
             self.queueMsg(ircmsgs.user(self.ident, self.user))
 
     def do903(self, msg):
+        self.sasl_successful = True
         log.info('%s: SASL authentication successful' % self.network)
         log.debug('Sending CAP END command.')
         self.queueMsg(ircmsgs.IrcMsg(command="CAP", args=('END',)))
 
     def do904(self, msg):
+        self.sasl_successful = False
         log.warning('%s: SASL authentication failed' % self.network)
+        if self.sasl_required:
+            log.error('%s: SASL auth failed but you told me not to connect without successful SASL.' % self.network)
+            self._reallyDie()
+        else:
+            log.warning("%s: SASL auth failed but you don't give a crap about that. Uh. Okay then." % self.network)
         log.debug('Aborting authentication.')
         log.debug('Sending CAP END command.')
         self.queueMsg(ircmsgs.IrcMsg(command="CAP", args=('END',)))
@@ -936,6 +949,12 @@ class Irc(IrcCommandDispatcher):
                 L[random.randrange(len(L))] = utils.iter.choice('0123456789')
                 ret = ''.join(L)
             return ret
+
+    def do001(self, msg):
+        """Interrupt connection in case SASL required."""
+        if not self.sasl_successful and self.sasl_password and self.sasl_required:
+            log.error('Managed to connect where SASL required but SASL login not successful. Emergency disconnect.')
+            self._reallyDie()
 
     def do002(self, msg):
         """Logs the ircd version."""
